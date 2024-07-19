@@ -9,7 +9,6 @@ class TFRecordDataset(Dataset):
         self.tf_dataset = tf_dataset
         self.data = list(tf_dataset.as_numpy_iterator())
 
-    
     def __len__(self):
         return len(self.data)
     
