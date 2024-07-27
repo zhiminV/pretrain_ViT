@@ -1,12 +1,13 @@
-import re
-from typing import Dict, List, Text, Tuple
+import logging
+import torch
 import tensorflow as tf
+from typing import Dict, List, Text, Tuple
 
-print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
+logger = logging.getLogger(__name__)
 
+# Constants and preprocessing functions
 INPUT_FEATURES = ['elevation', 'th', 'vs', 'tmmn', 'tmmx', 'sph', 'pr', 'pdsi', 'NDVI', 'population', 'erc', 'PrevFireMask']
 OUTPUT_FEATURES = ['FireMask', ]
-
 DATA_STATS = {
     'elevation': (0.0, 3141.0, 657.3003, 649.0147),
     'pdsi': (-6.12974870967865, 7.876040384292651, -0.0052714925, 2.6823447),
@@ -22,19 +23,6 @@ DATA_STATS = {
     'PrevFireMask': (-1., 1., 0., 1.),
     'FireMask': (-1., 1., 0., 1.)
 }
-
-def random_crop_input_and_output_images(input_img: tf.Tensor, output_img: tf.Tensor, sample_size: int, num_in_channels: int, num_out_channels: int) -> Tuple[tf.Tensor, tf.Tensor]:
-    combined = tf.concat([input_img, output_img], axis=2)
-    combined = tf.image.random_crop(combined, [sample_size, sample_size, num_in_channels + num_out_channels])
-    input_img = combined[:, :, 0:num_in_channels]
-    output_img = combined[:, :, -num_out_channels:]
-    return input_img, output_img
-
-def center_crop_input_and_output_images(input_img: tf.Tensor, output_img: tf.Tensor, sample_size: int) -> Tuple[tf.Tensor, tf.Tensor]:
-    central_fraction = sample_size / input_img.shape[0]
-    input_img = tf.image.central_crop(input_img, central_fraction)
-    output_img = tf.image.central_crop(output_img, central_fraction)
-    return input_img, output_img
 
 def _get_base_key(key: Text) -> Text:
     match = re.match(r'([a-zA-Z]+)', key)
@@ -59,11 +47,18 @@ def _clip_and_normalize(inputs: tf.Tensor, key: Text) -> tf.Tensor:
     inputs = inputs - mean
     return tf.math.divide_no_nan(inputs, std)
 
-def _get_features_dict(sample_size: int, features: List[Text]) -> Dict[Text, tf.io.FixedLenFeature]:
-    sample_shape = [sample_size, sample_size]
-    features = set(features)
-    columns = [tf.io.FixedLenFeature(shape=sample_shape, dtype=tf.float32) for _ in features]
-    return dict(zip(features, columns))
+def random_crop_input_and_output_images(input_img: tf.Tensor, output_img: tf.Tensor, sample_size: int, num_in_channels: int, num_out_channels: int) -> Tuple[tf.Tensor, tf.Tensor]:
+    combined = tf.concat([input_img, output_img], axis=2)
+    combined = tf.image.random_crop(combined, [sample_size, sample_size, num_in_channels + num_out_channels])
+    input_img = combined[:, :, 0:num_in_channels]
+    output_img = combined[:, :, -num_out_channels:]
+    return input_img, output_img
+
+def center_crop_input_and_output_images(input_img: tf.Tensor, output_img: tf.Tensor, sample_size: int) -> Tuple[tf.Tensor, tf.Tensor]:
+    central_fraction = sample_size / input_img.shape[0]
+    input_img = tf.image.central_crop(input_img, central_fraction)
+    output_img = tf.image.central_crop(output_img, central_fraction)
+    return input_img, output_img
 
 def _parse_fn(example_proto: tf.train.Example, data_size: int, sample_size: int, num_in_channels: int, clip_and_normalize: bool, clip_and_rescale: bool, random_crop: bool, center_crop: bool) -> Tuple[tf.Tensor, tf.Tensor]:
     if (random_crop and center_crop):
@@ -88,9 +83,7 @@ def _parse_fn(example_proto: tf.train.Example, data_size: int, sample_size: int,
     outputs_stacked = tf.stack(outputs_list, axis=0)
 
     outputs_stacked_shape = outputs_stacked.get_shape().as_list()
-    assert len(outputs_stacked.shape) == 3, ('outputs_stacked should be rank 3'
-                                            'but dimensions of outputs_stacked'
-                                            f' are {outputs_stacked_shape}')
+    assert len(outputs_stacked.shape) == 3, ('outputs_stacked should be rank 3 but dimensions of outputs_stacked are {}'.format(outputs_stacked_shape))
     output_img = tf.transpose(outputs_stacked, [1, 2, 0])
 
     if random_crop:
@@ -98,6 +91,12 @@ def _parse_fn(example_proto: tf.train.Example, data_size: int, sample_size: int,
     if center_crop:
         input_img, output_img = center_crop_input_and_output_images(input_img, output_img, sample_size)
     return input_img, output_img
+
+def _get_features_dict(sample_size: int, features: List[Text]) -> Dict[Text, tf.io.FixedLenFeature]:
+    sample_shape = [sample_size, sample_size]
+    features = set(features)
+    columns = [tf.io.FixedLenFeature(shape=sample_shape, dtype=tf.float32) for _ in features]
+    return dict(zip(features, columns))
 
 def get_dataset(file_pattern: Text, data_size: int, sample_size: int, batch_size: int, num_in_channels: int, compression_type: Text, clip_and_normalize: bool, clip_and_rescale: bool, random_crop: bool, center_crop: bool) -> tf.data.Dataset:
     if (clip_and_normalize and clip_and_rescale):
@@ -110,13 +109,13 @@ def get_dataset(file_pattern: Text, data_size: int, sample_size: int, batch_size
     dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
     return dataset
 
-BATCH_SIZE = 32
+# BATCH_SIZE = 32
 
-train_dataset = get_dataset('/home/liang.zhimi/ondemand/northamerica_2012-2023/train/*_ongoing_*.tfrecord', data_size=64, sample_size=32, batch_size=BATCH_SIZE, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
+# train_dataset = get_dataset('/Users/lzm/Desktop/7980 Capstone/rayan 项目/northamerica_2012-2023/train/*_ongoing_*.tfrecord', data_size=64, sample_size=32, batch_size=BATCH_SIZE, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
 
-validation_dataset = get_dataset('/home/liang.zhimi/ondemand/northamerica_2012-2023/val/*_ongoing_*.tfrecord', data_size=64, sample_size=32, batch_size=BATCH_SIZE, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
+# validation_dataset = get_dataset('/Users/lzm/Desktop/7980 Capstone/rayan 项目/northamerica_2012-2023/val/*_ongoing_*.tfrecord', data_size=64, sample_size=32, batch_size=BATCH_SIZE, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
 
-test_dataset = get_dataset('/home/liang.zhimi/ondemand/northamerica_2012-2023/test/*_ongoing_*.tfrecord', data_size=64, sample_size=32, batch_size=BATCH_SIZE, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
+# test_dataset = get_dataset('/Users/lzm/Desktop/7980 Capstone/rayan 项目/northamerica_2012-2023/test/*_ongoing_*.tfrecord', data_size=64, sample_size=32, batch_size=BATCH_SIZE, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
 
 
 # def count_elements(dataset):
