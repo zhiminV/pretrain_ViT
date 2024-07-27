@@ -26,6 +26,9 @@ def get_loader(args):
     if args.local_rank not in [-1, 0]:
         torch.distributed.barrier()
 
+    # Adjust the crop size to match the input image size
+    crop_size = 32  # or any size <= 64
+
     transform_train = transforms.Compose([
         transforms.RandomResizedCrop((224, 224), scale=(0.05, 1.0)),
         transforms.ToTensor(),
@@ -37,9 +40,9 @@ def get_loader(args):
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
     ])
 
-    train_dataset_tf = get_dataset('/Users/lzm/Desktop/7980 Capstone/rayan 项目/northamerica_2012-2023/train/*_ongoing_*.tfrecord', data_size=64, sample_size=224, batch_size=args.train_batch_size, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
-    val_dataset_tf = get_dataset('/Users/lzm/Desktop/7980 Capstone/rayan 项目/northamerica_2012-2023/val/*_ongoing_*.tfrecord', data_size=64, sample_size=224, batch_size=args.eval_batch_size, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
-    test_dataset_tf = get_dataset('/Users/lzm/Desktop/7980 Capstone/rayan 项目/northamerica_2012-2023/test/*_ongoing_*.tfrecord', data_size=64, sample_size=224, batch_size=args.eval_batch_size, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
+    train_dataset_tf = get_dataset('/Users/lzm/Desktop/7980 Capstone/rayan 项目/northamerica_2012-2023/train/*_ongoing_*.tfrecord', data_size=64, sample_size=crop_size, batch_size=args.train_batch_size, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
+    val_dataset_tf = get_dataset('/Users/lzm/Desktop/7980 Capstone/rayan 项目/northamerica_2012-2023/val/*_ongoing_*.tfrecord', data_size=64, sample_size=crop_size, batch_size=args.eval_batch_size, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
+    test_dataset_tf = get_dataset('/Users/lzm/Desktop/7980 Capstone/rayan 项目/northamerica_2012-2023/test/*_ongoing_*.tfrecord', data_size=64, sample_size=crop_size, batch_size=args.eval_batch_size, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
 
     train_dataset = NextDayFireDataset(train_dataset_tf, transform=transform_train)
     val_dataset = NextDayFireDataset(val_dataset_tf, transform=transform_test)

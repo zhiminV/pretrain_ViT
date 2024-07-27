@@ -4,9 +4,11 @@ import logging
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+import numpy as np
 from modeling import VisionTransformer, CONFIGS
 from data_utils import get_loader
 import argparse
+from transformers import AdamW 
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +47,26 @@ def evaluate_model(model, val_loader):
             total_loss += loss.item()
     print(f"Validation Loss: {total_loss/len(val_loader):.4f}")
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--name", required=True)
+    parser.add_argument("--dataset", choices=["cifar10", "cifar100", "your_dataset_name"], required=True)
+    parser.add_argument("--model_type", choices=list(CONFIGS.keys()), required=True)
+    parser.add_argument("--pretrained_dir", type=str, required=True)
+    parser.add_argument("--train_batch_size", default=32, type=int)
+    parser.add_argument("--eval_batch_size", default=32, type=int)
+    parser.add_argument("--fp16", action="store_true")
+    parser.add_argument("--fp16_opt_level", type=str, default="O1")
     parser.add_argument("--local_rank", type=int, default=-1)
-    parser.add_argument("--train_batch_size", type=int, default=32)
-    parser.add_argument("--eval_batch_size", type=int, default=32)
+
     args = parser.parse_args()
 
     train_loader, val_loader, test_loader = get_loader(args)
-    config = CONFIGS["ViT-B_16"]
-    model = VisionTransformer(config, img_size=224, num_classes=1)
+    config = CONFIGS[args.model_type]
+    model = VisionTransformer(config, num_classes=1, zero_head=True)
+
+    model.load_from(np.load(args.pretrained_dir))
     train_model(model, train_loader, val_loader)
+
+if __name__ == "__main__":
+    main()
