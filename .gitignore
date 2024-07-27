@@ -21,3 +21,6 @@ __pycache__
 
 #Ignore env
 env
+
+ViT-B_16.npz
+
