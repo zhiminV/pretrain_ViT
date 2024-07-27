@@ -4,7 +4,7 @@ from tqdm import tqdm
 from transformers import ViTFeatureExtractor, ViTModel
 import torch.nn as nn
 from torch.optim import AdamW
-from TFtoTorch import train_loader, val_loader
+from data_utils import train_loader, val_loader
 from pretrainViT import model
 
 criterion = nn.BCEWithLogitsLoss()

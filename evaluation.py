@@ -1,6 +1,6 @@
 import torch
 from tqdm import tqdm
-from TFtoTorch import test_loader, model
+from data_utils import test_loader, model
 
 def evaluate_model(model, test_loader):
     model.eval()
