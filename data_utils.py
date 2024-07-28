@@ -3,24 +3,103 @@ import torch
 from torch.utils.data import DataLoader, RandomSampler, DistributedSampler, SequentialSampler
 from torchvision import transforms
 import tensorflow as tf
-from typing import Dict, List, Text, Tuple
+from typing import Dict, List, Text, Tuple, Literal
 from preprocessData import get_dataset
-
+import numpy as np
+from PIL import Image
+from preprocessData import (
+    INPUT_FEATURES,
+    OUTPUT_FEATURES,
+    _get_features_dict,
+    _clip_and_normalize,
+    calculate_fire_change,
+    random_crop,
+)
 logger = logging.getLogger(__name__)
 
 class NextDayFireDataset(torch.utils.data.Dataset):
-    def __init__(self, tf_dataset, transform=None):
-        self.tf_dataset = list(tf_dataset)
+    """Next Day Fire dataset."""
+
+    def __init__(
+        self,
+        tf_dataset: tf.data.Dataset,
+        transform=None,
+        clip_normalize: bool = True,
+        limit_features_list: list = None,
+        use_change_mask: bool = False,
+        sampling_method: Literal[
+            'random_crop', 'center_crop', 'downsample', 'original'
+        ] = 'random_crop',
+        mode: Literal['train', 'val', 'test'] = 'train',
+    ):
+        self.tf_dataset = tf_dataset
         self.transform = transform
+        self.feature_description = _get_features_dict(
+            64, INPUT_FEATURES + OUTPUT_FEATURES
+        )
+        self.mask_values = [0, 1]  # only 0 and 1 are valid mask values
+        self.clip_normalize = clip_normalize
+        self.use_change_mask = use_change_mask
+        self.sampling_method = sampling_method
+        self.mode = mode
+        self.limit_features_list = limit_features_list
+        logging.info(f'Unique mask values: {self.mask_values}')
 
     def __len__(self):
-        return len(self.tf_dataset)
+        return self.tf_dataset.reduce(0, lambda x, _: x + 1).numpy()
 
     def __getitem__(self, idx):
-        image, label = self.tf_dataset[idx]
+        item = next(iter(self.tf_dataset.skip(idx).take(1)))
+        item = tf.io.parse_single_example(item, self.feature_description)
+        target = item.pop('FireMask')
+        # Get the change mask
+        if self.use_change_mask:
+            target = calculate_fire_change(item.get('PrevFireMask'), target)
+        if self.limit_features_list:
+            item = {key: item[key] for key in self.limit_features_list}
+            # Clip and normalize features
+            if self.clip_normalize:
+                item = [
+                    _clip_and_normalize(item.get(key), key)
+                    for key in self.limit_features_list
+                ]
+            else:
+                item = [item.get(key) for key in self.limit_features_list]
+
+        if not self.use_change_mask:
+            target = tf.cast(target, tf.float16).numpy()
+            if self.mode == 'train':
+                # convert to binary mask
+                target = np.where(target > 0, 1, 0)
+        target = np.expand_dims(target, axis=0)
+        features = [tf.cast(x, tf.float16).numpy() for x in list(item.values())]
+        item = np.stack(features, axis=0)
+
+        if self.sampling_method == 'random_crop':
+            item, target = random_crop(
+                item,
+                target,
+            )
+        elif self.sampling_method == 'center_crop':
+            item = item[:, 16:-16, 16:-16]
+            target = target[:, 16:-16, 16:-16]
+        elif self.sampling_method == 'downsample':
+            item = item[:, ::2, ::2]
+            target = target[:, ::2, ::2]
+        elif self.sampling_method == 'original':
+            pass
+        else:
+            raise NotImplementedError
+
+        # Transform the features to a PIL Image and apply transforms
+        item = np.moveaxis(item, 0, -1)  # Move channels to the last dimension
+        item = Image.fromarray((item * 255).astype('uint8'))
+
         if self.transform:
-            image = self.transform(image.numpy())
-        return torch.tensor(image, dtype=torch.float32).permute(2, 0, 1), torch.tensor(label.numpy(), dtype=torch.float32)
+            item = self.transform(item)
+
+        return item, target
+
 
 def get_loader(args):
     if args.local_rank not in [-1, 0]:
@@ -40,9 +119,9 @@ def get_loader(args):
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
     ])
 
-    train_dataset_tf = get_dataset('/Users/lzm/Desktop/7980 Capstone/rayan 项目/northamerica_2012-2023/train/*_ongoing_*.tfrecord', data_size=64, sample_size=crop_size, batch_size=args.train_batch_size, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
-    val_dataset_tf = get_dataset('/Users/lzm/Desktop/7980 Capstone/rayan 项目/northamerica_2012-2023/val/*_ongoing_*.tfrecord', data_size=64, sample_size=crop_size, batch_size=args.eval_batch_size, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
-    test_dataset_tf = get_dataset('/Users/lzm/Desktop/7980 Capstone/rayan 项目/northamerica_2012-2023/test/*_ongoing_*.tfrecord', data_size=64, sample_size=crop_size, batch_size=args.eval_batch_size, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
+    train_dataset_tf = get_dataset('/home/liang.zhimi/ondemand/northamerica_2012-2023/train/*_ongoing_*.tfrecord', data_size=64, sample_size=crop_size, batch_size=args.train_batch_size, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
+    val_dataset_tf = get_dataset('/home/liang.zhimi/ondemand/northamerica_2012-2023/val/*_ongoing_*.tfrecord', data_size=64, sample_size=crop_size, batch_size=args.eval_batch_size, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
+    test_dataset_tf = get_dataset('/home/liang.zhimi/ondemand/northamerica_2012-2023/test/*_ongoing_*.tfrecord', data_size=64, sample_size=crop_size, batch_size=args.eval_batch_size, num_in_channels=12, compression_type=None, clip_and_normalize=True, clip_and_rescale=False, random_crop=True, center_crop=False)
 
     train_dataset = NextDayFireDataset(train_dataset_tf, transform=transform_train)
     val_dataset = NextDayFireDataset(val_dataset_tf, transform=transform_test)

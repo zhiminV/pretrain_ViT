@@ -1,4 +1,3 @@
-# coding=utf-8
 from __future__ import absolute_import, division, print_function
 import logging
 import torch
@@ -12,6 +11,8 @@ from transformers import AdamW
 
 logger = logging.getLogger(__name__)
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
 def train_model(model, train_loader, val_loader, epochs=15, learning_rate=1e-4):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -22,7 +23,17 @@ def train_model(model, train_loader, val_loader, epochs=15, learning_rate=1e-4):
     for epoch in range(epochs):
         model.train()
         running_loss = 0.0
-        for inputs, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+        print(f"Starting Epoch {epoch+1}")
+
+        # Debug data loading
+        for i, (inputs, labels) in enumerate(train_loader):
+            print(f"Batch {i+1} loaded.")
+            if i == 2:  # Load a few batches and then break
+                break
+        
+        # Training loop
+        for i, (inputs, labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/15")):
+            print(f"Batch {i+1}/{len(train_loader)} loaded successfully.")
             inputs, labels = inputs.to(device), labels.to(device).float()
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -30,8 +41,9 @@ def train_model(model, train_loader, val_loader, epochs=15, learning_rate=1e-4):
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
+            print(f"Batch {i+1}/{len(train_loader)}, Loss: {loss.item()}")
+        
         print(f"Epoch [{epoch+1}/{epochs}], Loss: {running_loss/len(train_loader):.4f}")
-
         evaluate_model(model, val_loader)
 
 def evaluate_model(model, val_loader):
@@ -53,8 +65,8 @@ def main():
     parser.add_argument("--dataset", choices=["cifar10", "cifar100", "your_dataset_name"], required=True)
     parser.add_argument("--model_type", choices=list(CONFIGS.keys()), required=True)
     parser.add_argument("--pretrained_dir", type=str, required=True)
-    parser.add_argument("--train_batch_size", default=32, type=int)
-    parser.add_argument("--eval_batch_size", default=32, type=int)
+    parser.add_argument("--train_batch_size", default=16, type=int)  # Reduced batch size
+    parser.add_argument("--eval_batch_size", default=16, type=int)    # Reduced batch size
     parser.add_argument("--fp16", action="store_true")
     parser.add_argument("--fp16_opt_level", type=str, default="O1")
     parser.add_argument("--local_rank", type=int, default=-1)
